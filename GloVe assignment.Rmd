@@ -1,0 +1,110 @@
+---
+title: "GloVe"
+author: "ChenXiangLe"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, warning=FALSE}
+library(text2vec)
+library(epubr)           # for reading epub files
+library(tm)              # for cleaning text
+library(ggplot2)         # for plots
+```
+
+```{r}
+# Step 1: Retrieve the text file
+x <- epub("pg11.epub")
+text <- x$data[[1]]
+print(text$section)
+updated_text <- text[c(-1,-14,-15),] # drop the pg-header, pg-footer and coverpage-wrapper
+```
+```{r}
+# Step 2: Convert the text into a vector of sentences, similar to the example in lecture
+#sentences <- c(
+#  "I love natural language processing",
+#  "Word embeddings capture semantic meanings",
+#  "GloVe embeddings are awesome",
+#  "We can learn word relationships",
+#  "I enjoy teaching NLP to students"
+#)
+
+text2 <- stripWhitespace(updated_text$text) # remove whitespaces
+
+final_text <- c()
+for (chapter in text2){
+  sentences <- strsplit(chapter,"[.!?]+") # split chapter into list of sentences
+  for (i in 2:length(sentences[[1]])){ # skip first sentence which is header "Chapter [roman_numeral]" 
+    clean_text <- removePunctuation(sentences[[1]][i]) # remove all punctuation
+    clean_text <- tolower(clean_text) # convert to lowercase
+    final_text <- c(final_text, clean_text)
+  }
+}
+
+print(final_text[c(1,2,3)]) # examine the first 3 sentences
+```
+
+```{r}
+# Step 3: Train a GloVe model
+
+# Hyperparameters to tune
+TERM_COUNT_MIN = 5
+SKIP_GRAMS_WINDOW = 5
+N_ITER = 50
+
+# Tokenize the sentences
+tokens <- word_tokenizer(final_text)
+
+# Create an iterator over the tokens
+it <- itoken(tokens, progressbar = FALSE)
+
+# Build the vocabulary
+vocab <- create_vocabulary(it)
+
+# Prune the vocabulary (optional: remove infrequent or frequent terms)
+vocab <- prune_vocabulary(vocab, term_count_min = TERM_COUNT_MIN)
+
+# Create a term-co-occurrence matrix (TCM)
+tcm <- create_tcm(it, vectorizer = vocab_vectorizer(vocab), skip_grams_window = SKIP_GRAMS_WINDOW)
+
+# Define the GloVe model
+glove <- GlobalVectors$new(rank = 50, x_max = 10)  # rank = embedding dimensions
+
+# Fit the GloVe model
+word_vectors <- glove$fit_transform(tcm, n_iter = N_ITER, convergence_tol = 0.01)
+
+# Combine word and context embeddings (optional)
+word_vectors <- word_vectors + t(glove$components)
+```
+
+```{r}
+# Retrieve embedding for a specific word
+word_embedding1 <- word_vectors["king", ]
+word_embedding2 <- word_vectors["queen", ]
+
+# cosine similarity
+(t(word_embedding1)%*%word_embedding2) / (norm(word_embedding1, type="2")*norm(word_embedding2, type="2")) 
+```
+
+```{r}
+# Perform PCA to reduce dimensions to 2D
+pca <- prcomp(word_vectors, center = TRUE, scale. = TRUE)
+word_vectors_pca <- data.frame(pca$x[, 1:2]) # take the first 2 components only out of 50
+word_vectors_pca$word <- rownames(word_vectors)
+#print(pca$x["queen",1:2])
+#print(pca$x["king",1:2])
+```
+
+```{r}
+# Plot the embeddings
+ggplot(word_vectors_pca, aes(x = PC1, y = PC2, label = word)) +
+  geom_point() +
+  geom_text(aes(label = word), hjust = 0, vjust = 1, size = 3) +
+  theme_minimal() +
+  labs(title = "Word Embeddings Visualization", x = "PC1", y = "PC2")
+```
+
